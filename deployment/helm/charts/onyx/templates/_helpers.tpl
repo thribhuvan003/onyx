@@ -297,6 +297,54 @@ Emits a single line ending with a comma.
 {{- end }}
 
 {{/*
+Model-server variant of the custom-CA env. The model servers run on a distroless
+image with no shell to run update-ca-certificates, so instead of pointing at the
+merged system store they trust the mounted bundle directly. The provided
+secret/configMap must therefore contain the FULL bundle under the key
+`ca-certificates.crt` (your custom roots plus any public roots the model server
+must reach directly).
+*/}}
+{{- define "onyx.customCACerts.modelServerEnv" -}}
+{{- if include "onyx.customCACerts.enabled" . -}}
+- name: REQUESTS_CA_BUNDLE
+  value: /etc/onyx/certs/ca-certificates.crt
+- name: SSL_CERT_FILE
+  value: /etc/onyx/certs/ca-certificates.crt
+{{- end -}}
+{{- end }}
+
+{{/*
+Model-server variant of the custom-CA mount: mounts the bundle directly (no
+update-ca-certificates step) at the path the env vars above point to.
+*/}}
+{{- define "onyx.customCACerts.modelServerVolumeMount" -}}
+{{- if include "onyx.customCACerts.enabled" . -}}
+- name: custom-ca-certs
+  mountPath: /etc/onyx/certs
+  readOnly: true
+{{- end -}}
+{{- end }}
+
+{{/*
+Render a volumeMounts block for the model servers, combining pod-specific mounts
+with the direct custom-CA bundle mount.
+Usage: include "onyx.modelServer.volumeMountsWithCA" (dict "ctx" . "volumeMounts" <list>)
+*/}}
+{{- define "onyx.modelServer.volumeMountsWithCA" -}}
+{{- $ca := include "onyx.customCACerts.modelServerVolumeMount" .ctx -}}
+{{- $existing := .volumeMounts -}}
+{{- if or $ca $existing -}}
+volumeMounts:
+{{- if $existing }}
+{{ toYaml $existing | nindent 2 }}
+{{- end }}
+{{- if $ca }}
+{{ $ca | nindent 2 }}
+{{- end }}
+{{- end -}}
+{{- end }}
+
+{{/*
 Render a volumeMounts block combining pod-specific mounts with the custom CA
 mount. Usage: include "onyx.volumeMountsWithCA" (dict "ctx" . "volumeMounts" <list>)
 */}}

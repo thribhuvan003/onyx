@@ -27,6 +27,12 @@ global:
 customCACerts:
   enabled: false
   # Exactly one of secretName / configMapName must be set when enabled.
+  #
+  # NOTE: the model servers run on a distroless image and cannot merge these certs
+  # into the system trust store (no update-ca-certificates). They trust the bundle
+  # directly, so the secret/configMap must include a key `ca-certificates.crt`
+  # containing the FULL bundle the model servers need (your custom roots plus any
+  # public roots they reach directly). Other pods still merge all mounted .crt files.
   secretName: ""
   configMapName: ""
 
@@ -162,13 +168,22 @@ inferenceCapability:
   startupProbe: {}
   readinessProbe: {}
   livenessProbe: {}
-  podSecurityContext: {}
+  # The model server runs on a distroless Docker Hardened Image as the nonroot
+  # UID 65532. customCACerts no longer runs update-ca-certificates (the bundle is
+  # mounted and trusted directly), so root is not needed.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    fsGroup: 65532
   securityContext:
-    # `privileged` is not needed by this workload and is intentionally omitted.
-    # root is kept only so the optional customCACerts feature can run
-    # update-ca-certificates; to run non-root, override this and
-    # podSecurityContext (see codeInterpreter below for the pattern).
-    runAsUser: 0
+    capabilities:
+      drop:
+        - ALL
+    runAsNonRoot: true
+    runAsUser: 65532
+    allowPrivilegeEscalation: false
+    # Left false: the model server writes the HuggingFace cache and logs at runtime.
+    readOnlyRootFilesystem: false
   nodeSelector: {}
   tolerations: []
   affinity: {}
@@ -223,13 +238,22 @@ indexCapability:
   startupProbe: {}
   readinessProbe: {}
   livenessProbe: {}
-  podSecurityContext: {}
+  # The model server runs on a distroless Docker Hardened Image as the nonroot
+  # UID 65532. customCACerts no longer runs update-ca-certificates (the bundle is
+  # mounted and trusted directly), so root is not needed.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    fsGroup: 65532
   securityContext:
-    # `privileged` is not needed by this workload and is intentionally omitted.
-    # root is kept only so the optional customCACerts feature can run
-    # update-ca-certificates; to run non-root, override this and
-    # podSecurityContext (see codeInterpreter below for the pattern).
-    runAsUser: 0
+    capabilities:
+      drop:
+        - ALL
+    runAsNonRoot: true
+    runAsUser: 65532
+    allowPrivilegeEscalation: false
+    # Left false: the model server writes the HuggingFace cache and logs at runtime.
+    readOnlyRootFilesystem: false
   nodeSelector: {}
   tolerations: []
   affinity: {}
