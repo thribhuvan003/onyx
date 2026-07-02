@@ -403,6 +403,7 @@ class ExternalAppType(str, PyEnum):
     LINEAR = "LINEAR"
     GITHUB = "GITHUB"
     HUBSPOT = "HUBSPOT"
+    NOTION = "NOTION"
     CUSTOM = "CUSTOM"
 
     @property
