@@ -4213,6 +4213,18 @@ class KVStore(Base):
     )
 
 
+class EncryptedKeyValueStore(Base):
+    """Encrypted-at-rest key/value storage for instance-level secrets. Postgres
+    only, never cached, so secrets stay out of Redis."""
+
+    __tablename__ = "encrypted_key_value_store"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[SensitiveValue[dict[str, Any]]] = mapped_column(
+        EncryptedJson(), nullable=False
+    )
+
+
 class SecuritySettings(Base):
     """Per-tenant runtime overrides for env-derived security settings.
 

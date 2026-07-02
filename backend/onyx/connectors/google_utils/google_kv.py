@@ -20,6 +20,9 @@ from onyx.connectors.google_utils.shared_constants import (
     DB_CREDENTIALS_AUTHENTICATION_METHOD,
 )
 from onyx.connectors.google_utils.shared_constants import (
+    DB_CREDENTIALS_DICT_APP_CREDENTIAL_KEY,
+)
+from onyx.connectors.google_utils.shared_constants import (
     DB_CREDENTIALS_DICT_SERVICE_ACCOUNT_KEY,
 )
 from onyx.connectors.google_utils.shared_constants import DB_CREDENTIALS_DICT_TOKEN_KEY
@@ -32,7 +35,11 @@ from onyx.connectors.google_utils.shared_constants import (
 )
 from onyx.connectors.google_utils.shared_constants import MISSING_SCOPES_ERROR_STR
 from onyx.connectors.google_utils.shared_constants import ONYX_SCOPE_INSTRUCTIONS
+from onyx.db.credentials import fetch_credential_by_id_for_user
 from onyx.db.credentials import update_credential_json
+from onyx.db.encrypted_kv_store import delete_encrypted_kv
+from onyx.db.encrypted_kv_store import load_encrypted_kv
+from onyx.db.encrypted_kv_store import upsert_encrypted_kv
 from onyx.db.models import User
 from onyx.key_value_store.factory import get_kv_store
 from onyx.key_value_store.interface import unwrap_str
@@ -111,9 +118,9 @@ def update_credential_access_tokens(
     source: DocumentSource,
     auth_method: GoogleOAuthAuthenticationMethod,
 ) -> OAuthCredentials | None:
-    app_credentials = get_google_app_cred(source)
+    app_credentials = _app_cred_on_row(credential_id, source, user, db_session)
     flow = InstalledAppFlow.from_client_config(
-        app_credentials.model_dump(),
+        app_credentials,
         scopes=GOOGLE_SCOPES[source],
         redirect_uri=_build_frontend_google_drive_redirect(source),
     )
@@ -138,6 +145,8 @@ def update_credential_access_tokens(
         raise e
 
     new_creds_dict = {
+        # update_credential_json replaces the row's json, so keep the app cred here
+        DB_CREDENTIALS_DICT_APP_CREDENTIAL_KEY: app_credentials,
         DB_CREDENTIALS_DICT_TOKEN_KEY: token_json_str,
         DB_CREDENTIALS_PRIMARY_ADMIN_KEY: email,
         DB_CREDENTIALS_AUTHENTICATION_METHOD: auth_method.value,
@@ -172,15 +181,46 @@ def build_service_account_creds(
     )
 
 
-def get_auth_url(credential_id: int, source: DocumentSource) -> str:
-    if source == DocumentSource.GOOGLE_DRIVE:
-        credential_json = _load_google_json(
-            get_kv_store().load(KV_GOOGLE_DRIVE_CRED_KEY)
+def _app_cred_on_row(
+    credential_id: int,
+    source: DocumentSource,
+    user: User,
+    db_session: Session,
+) -> dict[str, Any]:
+    """OAuth app credential for this connector, read off the credential row.
+
+    Pre-fills the row from the instance default on first use so the row is the
+    single source of truth for the rest of the OAuth flow (no runtime fallback)."""
+    credential = fetch_credential_by_id_for_user(credential_id, user, db_session)
+    if credential is None:
+        raise ValueError(f"Credential {credential_id} not found")
+    existing_json = (
+        credential.credential_json.get_value(apply_mask=False)
+        if credential.credential_json
+        else {}
+    )
+    existing = existing_json.get(DB_CREDENTIALS_DICT_APP_CREDENTIAL_KEY)
+    if existing is not None:
+        return _load_google_json(existing)
+
+    default = _load_google_json(load_encrypted_kv(_app_cred_default_key(source)))
+    # get_value returns SensitiveValue's cached dict, so build a new one rather
+    # than mutating it in place.
+    updated_json = {**existing_json, DB_CREDENTIALS_DICT_APP_CREDENTIAL_KEY: default}
+    if update_credential_json(credential_id, updated_json, user, db_session) is None:
+        raise ValueError(
+            f"Failed to persist app credential onto credential {credential_id}"
         )
-    elif source == DocumentSource.GMAIL:
-        credential_json = _load_google_json(get_kv_store().load(KV_GMAIL_CRED_KEY))
-    else:
-        raise ValueError(f"Unsupported source: {source}")
+    return default
+
+
+def get_auth_url(
+    credential_id: int,
+    source: DocumentSource,
+    user: User,
+    db_session: Session,
+) -> str:
+    credential_json = _app_cred_on_row(credential_id, source, user, db_session)
     flow = InstalledAppFlow.from_client_config(
         credential_json,
         scopes=GOOGLE_SCOPES[source],
@@ -204,37 +244,28 @@ def get_auth_url(credential_id: int, source: DocumentSource) -> str:
     return str(auth_url)
 
 
-def get_google_app_cred(source: DocumentSource) -> GoogleAppCredentials:
+def _app_cred_default_key(source: DocumentSource) -> str:
+    """Encrypted-table key holding the instance-default OAuth app credential."""
     if source == DocumentSource.GOOGLE_DRIVE:
-        creds = _load_google_json(get_kv_store().load(KV_GOOGLE_DRIVE_CRED_KEY))
-    elif source == DocumentSource.GMAIL:
-        creds = _load_google_json(get_kv_store().load(KV_GMAIL_CRED_KEY))
-    else:
-        raise ValueError(f"Unsupported source: {source}")
+        return KV_GOOGLE_DRIVE_CRED_KEY
+    if source == DocumentSource.GMAIL:
+        return KV_GMAIL_CRED_KEY
+    raise ValueError(f"Unsupported source: {source}")
+
+
+def get_google_app_cred(source: DocumentSource) -> GoogleAppCredentials:
+    """The instance-default OAuth app credential (Postgres, never cached)."""
+    creds = _load_google_json(load_encrypted_kv(_app_cred_default_key(source)))
     return GoogleAppCredentials(**creds)
 
 
 def upsert_google_app_cred(
     app_credentials: GoogleAppCredentials, source: DocumentSource
 ) -> None:
-    if source == DocumentSource.GOOGLE_DRIVE:
-        get_kv_store().store(
-            KV_GOOGLE_DRIVE_CRED_KEY,
-            app_credentials.model_dump(mode="json"),
-            encrypt=True,
-        )
-    elif source == DocumentSource.GMAIL:
-        get_kv_store().store(
-            KV_GMAIL_CRED_KEY, app_credentials.model_dump(mode="json"), encrypt=True
-        )
-    else:
-        raise ValueError(f"Unsupported source: {source}")
+    upsert_encrypted_kv(
+        _app_cred_default_key(source), app_credentials.model_dump(mode="json")
+    )
 
 
 def delete_google_app_cred(source: DocumentSource) -> None:
-    if source == DocumentSource.GOOGLE_DRIVE:
-        get_kv_store().delete(KV_GOOGLE_DRIVE_CRED_KEY)
-    elif source == DocumentSource.GMAIL:
-        get_kv_store().delete(KV_GMAIL_CRED_KEY)
-    else:
-        raise ValueError(f"Unsupported source: {source}")
+    delete_encrypted_kv(_app_cred_default_key(source))

@@ -1693,7 +1693,8 @@ def connector_run_once(
 def gmail_auth(
     response: Response,
     credential_id: str,
-    _: User = Depends(require_permission(Permission.BASIC_ACCESS)),
+    user: User = Depends(require_permission(Permission.BASIC_ACCESS)),
+    db_session: Session = Depends(get_session),
 ) -> AuthUrl:
     # set a cookie that we can read in the callback (used for `verify_csrf`)
     response.set_cookie(
@@ -1702,14 +1703,19 @@ def gmail_auth(
         httponly=True,
         max_age=600,
     )
-    return AuthUrl(auth_url=get_auth_url(int(credential_id), DocumentSource.GMAIL))
+    return AuthUrl(
+        auth_url=get_auth_url(
+            int(credential_id), DocumentSource.GMAIL, user, db_session
+        )
+    )
 
 
 @router.get("/connector/google-drive/authorize/{credential_id}")
 def google_drive_auth(
     response: Response,
     credential_id: str,
-    _: User = Depends(require_permission(Permission.BASIC_ACCESS)),
+    user: User = Depends(require_permission(Permission.BASIC_ACCESS)),
+    db_session: Session = Depends(get_session),
 ) -> AuthUrl:
     # set a cookie that we can read in the callback (used for `verify_csrf`)
     response.set_cookie(
@@ -1719,7 +1725,9 @@ def google_drive_auth(
         max_age=600,
     )
     return AuthUrl(
-        auth_url=get_auth_url(int(credential_id), DocumentSource.GOOGLE_DRIVE)
+        auth_url=get_auth_url(
+            int(credential_id), DocumentSource.GOOGLE_DRIVE, user, db_session
+        )
     )
 
 
