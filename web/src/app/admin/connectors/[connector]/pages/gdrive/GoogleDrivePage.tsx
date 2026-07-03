@@ -19,7 +19,6 @@ import {
   useConnectorsByCredentialId,
   checkCredentialsFetched,
   filterUploadedCredentials,
-  checkConnectorsExist,
   refreshAllGoogleData,
 } from "@/lib/googleConnector";
 
@@ -109,9 +108,6 @@ const GDriveMain = () => {
     );
   }
 
-  // Check if connectors exist
-  const connectorAssociated = checkConnectorsExist(googleDriveConnectors);
-
   // Get the uploaded OAuth credential
   const googleDrivePublicUploadedCredential:
     | Credential<GoogleDriveCredentialJson>
@@ -150,14 +146,7 @@ const GDriveMain = () => {
           <Title className="mb-2 mt-6">Step 2: Authenticate with Onyx</Title>
           <DriveAuthSection
             refreshCredentials={handleRefresh}
-            googleDrivePublicUploadedCredential={
-              googleDrivePublicUploadedCredential
-            }
-            googleDriveServiceAccountCredential={
-              googleDriveServiceAccountCredential
-            }
             appCredentialData={appCredentialData}
-            connectorAssociated={connectorAssociated}
             user={user}
           />
         </>

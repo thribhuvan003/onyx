@@ -377,6 +377,7 @@ export const GmailAuthSection = ({
 }: GmailCredentialSectionProps) => {
   const router = useRouter();
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [justCreated, setJustCreated] = useState(false);
   const [localAppCredentialData, setLocalAppCredentialData] =
     useState(appCredentialData);
   const [serviceAccountKey, setServiceAccountKey] = useState<Record<
@@ -400,7 +401,9 @@ export const GmailAuthSection = ({
 
   const existingCredential =
     localGmailPublicCredential || localGmailServiceAccountCredential;
-  if (existingCredential) {
+  // Confirm only a credential created in this session. A pre-existing one must
+  // not gate the form, or a second could never be created. Revoke is in the list.
+  if (justCreated) {
     return (
       <div>
         <div className="mt-4">
@@ -414,25 +417,27 @@ export const GmailAuthSection = ({
               </p>
             </div>
           </div>
-          <Section flexDirection="row" justifyContent="between" height="fit">
-            <Button
-              variant="danger"
-              onClick={async () => {
-                handleRevokeAccess(
-                  connectorExists,
-                  existingCredential,
-                  refreshCredentials
-                );
-              }}
-            >
-              Revoke Access
-            </Button>
-            {buildMode && onCredentialCreated && (
-              <Button onClick={() => onCredentialCreated(existingCredential)}>
-                Continue
+          {existingCredential && (
+            <Section flexDirection="row" justifyContent="between" height="fit">
+              <Button
+                variant="danger"
+                onClick={async () => {
+                  handleRevokeAccess(
+                    connectorExists,
+                    existingCredential,
+                    refreshCredentials
+                  );
+                }}
+              >
+                Revoke Access
               </Button>
-            )}
-          </Section>
+              {buildMode && onCredentialCreated && (
+                <Button onClick={() => onCredentialCreated(existingCredential)}>
+                  Continue
+                </Button>
+              )}
+            </Section>
+          )}
         </div>
       </div>
     );
@@ -550,6 +555,7 @@ export const GmailAuthSection = ({
                 toast.success(
                   "Successfully created service account credential"
                 );
+                setJustCreated(true);
                 refreshCredentials();
               } else {
                 const errorMsg = await response.text();
