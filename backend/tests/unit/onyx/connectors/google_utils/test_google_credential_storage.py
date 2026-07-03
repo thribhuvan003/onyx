@@ -151,12 +151,6 @@ def test_get_auth_url_accepts_dict_and_legacy_string(
     )
     stored_state: dict[str, object] = {}
 
-    class _StubKvStore:
-        def store(self, key: str, value: object, encrypt: bool) -> None:
-            stored_state["key"] = key
-            stored_state["value"] = value
-            stored_state["encrypt"] = encrypt
-
     class _StubFlow:
         code_verifier: str | None = None
 
@@ -189,6 +183,10 @@ def test_get_auth_url_accepts_dict_and_legacy_string(
         del key
         raise AssertionError("load_encrypted_kv should not be called")
 
+    def _upsert_encrypted_kv(key: str, value: dict[str, Any]) -> None:
+        stored_state["key"] = key
+        stored_state["value"] = value
+
     def _from_client_config(
         _app_config: object, *, scopes: object, redirect_uri: object
     ) -> _StubFlow:
@@ -208,7 +206,8 @@ def test_get_auth_url_accepts_dict_and_legacy_string(
         _load_encrypted_kv,
     )
     monkeypatch.setattr(
-        "onyx.connectors.google_utils.google_kv.get_kv_store", lambda: _StubKvStore()
+        "onyx.connectors.google_utils.google_kv.upsert_encrypted_kv",
+        _upsert_encrypted_kv,
     )
     monkeypatch.setattr(
         "onyx.connectors.google_utils.google_kv.InstalledAppFlow.from_client_config",
@@ -227,7 +226,6 @@ def test_get_auth_url_accepts_dict_and_legacy_string(
         "value": "test-state",
         "code_verifier": "test-verifier",
     }
-    assert stored_state["encrypt"] is True
 
 
 def test_update_credential_access_tokens_restores_pkce_verifier(
@@ -251,11 +249,6 @@ def test_update_credential_access_tokens_restores_pkce_verifier(
         @property
         def credentials(self) -> _StubCreds:
             return _StubCreds()
-
-    class _StubKvStore:
-        def load(self, key: str) -> object:
-            assert key == KV_CRED_KEY.format("42")
-            return {"value": "test-state", "code_verifier": "test-verifier"}
 
     def _fetch_credential_by_id_for_user(
         credential_id: int,
@@ -286,15 +279,12 @@ def test_update_credential_access_tokens_restores_pkce_verifier(
         return True
 
     def _load_encrypted_kv(key: str) -> object:
-        del key
-        raise AssertionError("load_encrypted_kv should not be called")
+        assert key == KV_CRED_KEY.format("42")
+        return {"value": "test-state", "code_verifier": "test-verifier"}
 
     monkeypatch.setattr(
         "onyx.connectors.google_utils.google_kv.fetch_credential_by_id_for_user",
         _fetch_credential_by_id_for_user,
-    )
-    monkeypatch.setattr(
-        "onyx.connectors.google_utils.google_kv.get_kv_store", lambda: _StubKvStore()
     )
     monkeypatch.setattr(
         "onyx.connectors.google_utils.google_kv.load_encrypted_kv",
@@ -344,12 +334,6 @@ def test_get_auth_url_prefills_app_credential_on_row_when_missing(
     stored_state: dict[str, object] = {}
     captured: dict[str, Any] = {}
 
-    class _StubKvStore:
-        def store(self, key: str, value: object, encrypt: bool) -> None:
-            stored_state["key"] = key
-            stored_state["value"] = value
-            stored_state["encrypt"] = encrypt
-
     class _StubFlow:
         code_verifier: str | None = None
 
@@ -372,6 +356,10 @@ def test_get_auth_url_prefills_app_credential_on_row_when_missing(
     def _load_encrypted_kv(key: str) -> object:
         assert key == KV_GOOGLE_DRIVE_CRED_KEY
         return default_payload
+
+    def _upsert_encrypted_kv(key: str, value: dict[str, Any]) -> None:
+        stored_state["key"] = key
+        stored_state["value"] = value
 
     def _update_credential_json(
         credential_id: int,
@@ -403,7 +391,8 @@ def test_get_auth_url_prefills_app_credential_on_row_when_missing(
         _update_credential_json,
     )
     monkeypatch.setattr(
-        "onyx.connectors.google_utils.google_kv.get_kv_store", lambda: _StubKvStore()
+        "onyx.connectors.google_utils.google_kv.upsert_encrypted_kv",
+        _upsert_encrypted_kv,
     )
     monkeypatch.setattr(
         "onyx.connectors.google_utils.google_kv.InstalledAppFlow.from_client_config",
@@ -426,17 +415,12 @@ def test_get_auth_url_prefills_app_credential_on_row_when_missing(
         "value": "test-state",
         "code_verifier": "test-verifier",
     }
-    assert stored_state["encrypt"] is True
 
 
 def test_get_auth_url_uses_app_credential_on_row_without_rewrite(
     monkeypatch: Any,
 ) -> None:
     payload = _make_app_creds().model_dump(mode="json")
-
-    class _StubKvStore:
-        def store(self, key: str, value: object, encrypt: bool) -> None:
-            del key, value, encrypt
 
     class _StubFlow:
         code_verifier: str | None = None
@@ -476,6 +460,9 @@ def test_get_auth_url_uses_app_credential_on_row_without_rewrite(
         del scopes, redirect_uri
         return _StubFlow()
 
+    def _upsert_encrypted_kv(key: str, value: dict[str, Any]) -> None:
+        del key, value
+
     monkeypatch.setattr(
         "onyx.connectors.google_utils.google_kv.fetch_credential_by_id_for_user",
         _fetch_credential_by_id_for_user,
@@ -489,7 +476,8 @@ def test_get_auth_url_uses_app_credential_on_row_without_rewrite(
         _update_credential_json,
     )
     monkeypatch.setattr(
-        "onyx.connectors.google_utils.google_kv.get_kv_store", lambda: _StubKvStore()
+        "onyx.connectors.google_utils.google_kv.upsert_encrypted_kv",
+        _upsert_encrypted_kv,
     )
     monkeypatch.setattr(
         "onyx.connectors.google_utils.google_kv.InstalledAppFlow.from_client_config",
@@ -513,12 +501,6 @@ def test_get_auth_url_uses_per_connector_app_over_default(
     row_payload = _make_app_creds().model_dump(mode="json")
     row_payload["web"]["client_id"] = row_client_id
     stored_state: dict[str, object] = {}
-
-    class _StubKvStore:
-        def store(self, key: str, value: object, encrypt: bool) -> None:
-            stored_state["key"] = key
-            stored_state["value"] = value
-            stored_state["encrypt"] = encrypt
 
     class _StubFlow:
         code_verifier: str | None = None
@@ -549,6 +531,10 @@ def test_get_auth_url_uses_per_connector_app_over_default(
         del key
         raise AssertionError("load_encrypted_kv should not be called")
 
+    def _upsert_encrypted_kv(key: str, value: dict[str, Any]) -> None:
+        stored_state["key"] = key
+        stored_state["value"] = value
+
     def _update_credential_json(
         credential_id: int,
         credential_json: dict[str, object],
@@ -578,7 +564,8 @@ def test_get_auth_url_uses_per_connector_app_over_default(
         _update_credential_json,
     )
     monkeypatch.setattr(
-        "onyx.connectors.google_utils.google_kv.get_kv_store", lambda: _StubKvStore()
+        "onyx.connectors.google_utils.google_kv.upsert_encrypted_kv",
+        _upsert_encrypted_kv,
     )
     monkeypatch.setattr(
         "onyx.connectors.google_utils.google_kv.InstalledAppFlow.from_client_config",
@@ -598,4 +585,3 @@ def test_get_auth_url_uses_per_connector_app_over_default(
         "value": "test-state",
         "code_verifier": "test-verifier",
     }
-    assert stored_state["encrypt"] is True
