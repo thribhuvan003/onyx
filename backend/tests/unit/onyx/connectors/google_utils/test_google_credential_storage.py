@@ -504,3 +504,98 @@ def test_get_auth_url_uses_app_credential_on_row_without_rewrite(
     )
 
     assert auth_url.startswith("https://accounts.google.com")
+
+
+def test_get_auth_url_uses_per_connector_app_over_default(
+    monkeypatch: Any,
+) -> None:
+    row_client_id = "row-client-999.apps.googleusercontent.com"
+    row_payload = _make_app_creds().model_dump(mode="json")
+    row_payload["web"]["client_id"] = row_client_id
+    stored_state: dict[str, object] = {}
+
+    class _StubKvStore:
+        def store(self, key: str, value: object, encrypt: bool) -> None:
+            stored_state["key"] = key
+            stored_state["value"] = value
+            stored_state["encrypt"] = encrypt
+
+    class _StubFlow:
+        code_verifier: str | None = None
+
+        def __init__(self, captured_client_id: str) -> None:
+            self.captured_client_id = captured_client_id
+
+        def authorization_url(self, prompt: str) -> tuple[str, None]:
+            assert prompt == "consent"
+            self.code_verifier = "test-verifier"
+            return (
+                "https://accounts.google.com/o/oauth2/auth?"
+                f"client_id={self.captured_client_id}&state=test-state"
+            ), None
+
+    def _fetch_credential_by_id_for_user(
+        credential_id: int,
+        user: User,
+        db_session: Session,
+        get_editable: bool = True,
+    ) -> _StubCredential:
+        del user, db_session
+        assert credential_id == 42
+        assert get_editable is True
+        return _StubCredential({DB_CREDENTIALS_DICT_APP_CREDENTIAL_KEY: row_payload})
+
+    def _load_encrypted_kv(key: str) -> object:
+        del key
+        raise AssertionError("load_encrypted_kv should not be called")
+
+    def _update_credential_json(
+        credential_id: int,
+        credential_json: dict[str, object],
+        user: User,
+        db_session: Session,
+    ) -> object:
+        del credential_id, credential_json, user, db_session
+        raise AssertionError("update_credential_json should not be called")
+
+    def _from_client_config(
+        app_config: object, *, scopes: object, redirect_uri: object
+    ) -> _StubFlow:
+        del scopes, redirect_uri
+        config = cast(dict[str, Any], app_config)
+        return _StubFlow(config["web"]["client_id"])
+
+    monkeypatch.setattr(
+        "onyx.connectors.google_utils.google_kv.fetch_credential_by_id_for_user",
+        _fetch_credential_by_id_for_user,
+    )
+    monkeypatch.setattr(
+        "onyx.connectors.google_utils.google_kv.load_encrypted_kv",
+        _load_encrypted_kv,
+    )
+    monkeypatch.setattr(
+        "onyx.connectors.google_utils.google_kv.update_credential_json",
+        _update_credential_json,
+    )
+    monkeypatch.setattr(
+        "onyx.connectors.google_utils.google_kv.get_kv_store", lambda: _StubKvStore()
+    )
+    monkeypatch.setattr(
+        "onyx.connectors.google_utils.google_kv.InstalledAppFlow.from_client_config",
+        _from_client_config,
+    )
+
+    auth_url = get_auth_url(
+        42,
+        DocumentSource.GOOGLE_DRIVE,
+        cast(User, None),
+        cast(Session, None),
+    )
+
+    assert f"client_id={row_client_id}" in auth_url
+    assert "client-id.apps.googleusercontent.com" not in auth_url
+    assert stored_state["value"] == {
+        "value": "test-state",
+        "code_verifier": "test-verifier",
+    }
+    assert stored_state["encrypt"] is True

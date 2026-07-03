@@ -384,6 +384,10 @@ export const GmailAuthSection = ({
     string,
     unknown
   > | null>(null);
+  const [customAppCredential, setCustomAppCredential] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
   const [localGmailPublicCredential, setLocalGmailPublicCredential] = useState(
     gmailPublicCredential
   );
@@ -445,12 +449,44 @@ export const GmailAuthSection = ({
 
   if (localAppCredentialData?.client_id) {
     return (
-      <div>
-        <div className="bg-background-50/30 dark:bg-background-900/20 rounded-sm mb-4">
-          <p className="text-sm">
-            Next, you need to authenticate with Gmail via OAuth. This gives us
-            read access to the emails you have access to in your Gmail account.
-          </p>
+      <div className="space-y-4">
+        <Text as="p" font="secondary-body" color="text-03">
+          Authenticate with Gmail via OAuth. This uses the instance OAuth app
+          unless you provide a different one for this connector below.
+        </Text>
+        <div className="space-y-1">
+          <Text as="p" font="main-ui-body" color="text-03">
+            Use a different OAuth app for this connector (optional)
+          </Text>
+          <InputFile
+            accept="application/json"
+            placeholder="Upload or paste an OAuth app JSON key"
+            setValue={(value) => {
+              if (!value) {
+                setCustomAppCredential(null);
+                return;
+              }
+              try {
+                const parsed = JSON.parse(value) as Record<string, unknown>;
+                const web = parsed.web as Record<string, unknown> | undefined;
+                if (
+                  !web ||
+                  typeof web.client_id !== "string" ||
+                  typeof web.client_secret !== "string"
+                ) {
+                  toast.error(
+                    "Invalid file provided - expected an OAuth app JSON key with web.client_id and web.client_secret"
+                  );
+                  setCustomAppCredential(null);
+                  return;
+                }
+                setCustomAppCredential(parsed);
+              } catch (error) {
+                toast.error(`Invalid file provided - ${error}`);
+                setCustomAppCredential(null);
+              }
+            }}
+          />
         </div>
         <Button
           disabled={isAuthenticating}
@@ -464,6 +500,7 @@ export const GmailAuthSection = ({
               }
               const [authUrl, errorMsg] = await setupGmailOAuth({
                 isAdmin: true,
+                appCredential: customAppCredential ?? undefined,
               });
 
               if (authUrl) {
